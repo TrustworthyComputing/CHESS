@@ -6,6 +6,7 @@
 #include "mlir/Dialect/EmitC/IR/EmitC.h"
 #include "mlir/IR/Dialect.h"
 #include "mlir/IR/MLIRContext.h"
+#include "mlir/Support/TypeID.h"
 #include "mlir/InitAllDialects.h"
 #include "mlir/InitAllPasses.h"
 #include "mlir/Pass/Pass.h"
@@ -46,6 +47,8 @@
 #include <cstdlib>
 
 #include <llvm/Demangle/Demangle.h>
+
+#include "main_emitter.hpp"
 
 using namespace mlir;
 using namespace llvm;
@@ -109,7 +112,7 @@ struct ArithToEmitc : public PassWrapper<ArithToEmitc, OperationPass<ModuleOp>> 
             newInputTypes.push_back(fhedouble);
             } 
             else if(inputType.isInteger(32)) {
-                newInputTypes.push_back(fhei32);
+                newInputTypes.push_back(fhedouble);
             }
             else if(auto vecType = inputType.dyn_cast<mlir::VectorType>()) {
                 auto elemType = vecType.getElementType();
@@ -122,13 +125,10 @@ struct ArithToEmitc : public PassWrapper<ArithToEmitc, OperationPass<ModuleOp>> 
             }
             else if(auto memRefType = inputType.dyn_cast<mlir::MemRefType>()) {
                 auto elemType = memRefType.getElementType();
-                outs() << "MemRefType: " << elemType << "\n";
-                if (elemType.isF64()) {
-                    newInputTypes.push_back(fhedouble);
-                }
-                else if(elemType.isInteger(32)) {
-                    outs() << "Integer 32\n";
-                    newInputTypes.push_back(fhei32);
+                if (elemType.isInteger(32) || elemType.isF64()) {
+                    newInputTypes.push_back(emitc::PointerType::get(fhedouble));
+                } else {
+                    newInputTypes.push_back(inputType);
                 }
             }
             else {
@@ -136,22 +136,16 @@ struct ArithToEmitc : public PassWrapper<ArithToEmitc, OperationPass<ModuleOp>> 
             }
         }
 
-        mlir::Type newReturnType;
-        if (funcType.getNumResults() > 0) {
-            mlir::Type returnType = funcType.getResult(0);
-            if (returnType.isF64()) {
-                newReturnType = fhedouble;  // Convert f64 to fhedouble
-            } else if (returnType.isInteger(32)) {
-                newReturnType = fhei32;  // Convert i32 to fhei32
+        SmallVector<mlir::Type, 4> newResultTypes;
+        for (auto returnType : funcType.getResults()) {
+            if (returnType.isF64() || returnType.isInteger(32)) {
+                newResultTypes.push_back(fhedouble);
             } else {
-                newReturnType = returnType;  // Keep the original type
+                newResultTypes.push_back(returnType);
             }
         }
-        else {
-            newReturnType = mlir::NoneType::get(builder.getContext());  // Void function
-        }
 
-        func.setType(mlir::FunctionType::get(builder.getContext(), newInputTypes, newReturnType));
+        func.setType(mlir::FunctionType::get(builder.getContext(), newInputTypes, newResultTypes));
 
         Block &entryBlock = func.getBody().front();
 
@@ -199,10 +193,39 @@ struct ArithToEmitc : public PassWrapper<ArithToEmitc, OperationPass<ModuleOp>> 
                     vectorOp.erase();
                 }
                 else if (auto vectorOp = dyn_cast<vector::TransferReadOp>(op)){
-                    auto value = vectorOp.getOperand(0);
-                    vectorOp.replaceAllUsesWith(value);
-
-                    // Now erase the original vector.transfer_read operation
+                    builder.setInsertionPoint(vectorOp);
+                    SmallVector<mlir::Value, 4> operands;
+                    operands.push_back(ckarg);
+                    operands.push_back(vectorOp.getOperand(0));
+                    for (auto index : vectorOp.getIndices()) {
+                        operands.push_back(index);
+                    }
+                    auto newOp = builder.create<emitc::CallOp>(
+                        vectorOp.getLoc(),
+                        TypeRange(fhedouble),
+                        llvm::StringRef("FHEloadf"),
+                        ArrayAttr(),
+                        ArrayAttr(),
+                        operands);
+                    vectorOp.replaceAllUsesWith(newOp.getResult(0));
+                    vectorOp.erase();
+                }
+                else if (auto vectorOp = dyn_cast<vector::TransferWriteOp>(op)){
+                    builder.setInsertionPoint(vectorOp);
+                    SmallVector<mlir::Value, 4> operands;
+                    operands.push_back(ckarg);
+                    operands.push_back(vectorOp.getOperand(0));
+                    operands.push_back(vectorOp.getOperand(1));
+                    for (auto index : vectorOp.getIndices()) {
+                        operands.push_back(index);
+                    }
+                    builder.create<emitc::CallOp>(
+                        vectorOp.getLoc(),
+                        TypeRange(),
+                        llvm::StringRef("FHEstoref"),
+                        ArrayAttr(),
+                        ArrayAttr(),
+                        operands);
                     vectorOp.erase();
                 }
                 else if (auto vectorOp = dyn_cast<vector::ReductionOp>(op)){
@@ -257,12 +280,54 @@ struct ArithToEmitc : public PassWrapper<ArithToEmitc, OperationPass<ModuleOp>> 
                 cmpOp.replaceAllUsesWith(newOp.getResult(0));
                 cmpOp.erase();
             }
+            else if (auto cmpOp = dyn_cast<arith::CmpIOp>(op)){
+                builder.setInsertionPoint(cmpOp);
+                auto arg0 = cmpOp.getOperand(0);
+                auto arg1 = cmpOp.getOperand(1);
+                auto predicate = cmpOp.getPredicate();
+                std::string funcName;
+                switch (predicate) {
+                    case arith::CmpIPredicate::eq:
+                        funcName = "FHEeq";
+                        break;
+                    case arith::CmpIPredicate::ne:
+                        funcName = "FHEne";
+                        break;
+                    case arith::CmpIPredicate::slt:
+                    case arith::CmpIPredicate::ult:
+                        funcName = "FHElt";
+                        break;
+                    case arith::CmpIPredicate::sgt:
+                    case arith::CmpIPredicate::ugt:
+                        funcName = "FHEgt";
+                        break;
+                    case arith::CmpIPredicate::sle:
+                    case arith::CmpIPredicate::ule:
+                        funcName = "FHEle";
+                        break;
+                    case arith::CmpIPredicate::sge:
+                    case arith::CmpIPredicate::uge:
+                        funcName = "FHEge";
+                        break;
+                }
+                auto newOp = builder.create<emitc::CallOp>(
+                    cmpOp.getLoc(),
+                    TypeRange(fhedouble),
+                    llvm::StringRef(funcName),
+                    ArrayAttr(),
+                    ArrayAttr(),
+                    mlir::ArrayRef<mlir::Value>{ckarg, arg0, arg1});
+
+                cmpOp.replaceAllUsesWith(newOp.getResult(0));
+                cmpOp.erase();
+            }
             
             else if (auto selectOp = dyn_cast<arith::SelectOp>(op)){
                 builder.setInsertionPoint(selectOp);
                 auto arg0 = selectOp.getOperand(0);
                 auto arg1 = selectOp.getOperand(1);
                 auto arg2 = selectOp.getOperand(2);
+
                 auto newOp = builder.create<emitc::CallOp>(
                     selectOp.getLoc(),
                     TypeRange(fhedouble),
@@ -270,10 +335,8 @@ struct ArithToEmitc : public PassWrapper<ArithToEmitc, OperationPass<ModuleOp>> 
                     ArrayAttr(),
                     ArrayAttr(),
                     mlir::ArrayRef<mlir::Value>{ckarg, arg0, arg1, arg2});
-
                 selectOp.replaceAllUsesWith(newOp.getResult(0));
                 selectOp.erase();
-                
             }
 
             else if (auto forOp = dyn_cast<scf::ForOp>(op)){
@@ -281,7 +344,7 @@ struct ArithToEmitc : public PassWrapper<ArithToEmitc, OperationPass<ModuleOp>> 
                 auto *newblock = forOp.getBody();
                 auto res = forOp.getResults();
                 for (auto it : llvm::enumerate(res)) {                    
-                    if (it.value().getType().isF64()) {
+                    if (it.value().getType().isF64() || it.value().getType().isInteger(32)) {
                         it.value().setType(fhedouble);
                     }
                     else if(auto vecType = it.value().getType().dyn_cast<mlir::VectorType>()) {                        auto elemType = vecType.getElementType();
@@ -291,7 +354,7 @@ struct ArithToEmitc : public PassWrapper<ArithToEmitc, OperationPass<ModuleOp>> 
                     }
                 }
                 for (auto it : llvm::enumerate(newblock->getArguments())) {                    
-                    if (it.value().getType().isF64()) {
+                    if (it.value().getType().isF64() || it.value().getType().isInteger(32)) {
                         it.value().setType(fhedouble);
                     }
                     else if(auto vecType = it.value().getType().dyn_cast<mlir::VectorType>()) {
@@ -370,6 +433,26 @@ struct ArithToEmitc : public PassWrapper<ArithToEmitc, OperationPass<ModuleOp>> 
                             mlir::ArrayRef<mlir::Value>{ckarg, newConstantOp.getResult()}
                         );
                         
+                        arithOp.replaceAllUsesWith(newCallOp->getResult(0));
+                        arithOp.erase();
+                    } else if (auto intAttr = arithOp.getValue().dyn_cast<IntegerAttr>()) {
+                        if (!arithOp.getType().isInteger(32)) {
+                            return;
+                        }
+                        double value2 = static_cast<double>(intAttr.getInt());
+                        auto newConstantOp = builder.create<emitc::ConstantOp>(
+                            arithOp.getLoc(),
+                            builder.getF64Type(),
+                            builder.getF64FloatAttr(value2)
+                        );
+                        auto newCallOp = builder.create<emitc::CallOp>(
+                            arithOp.getLoc(),
+                            TypeRange(fhedouble),
+                            llvm::StringRef("FHEencrypt"),
+                            ArrayAttr(),
+                            ArrayAttr(),
+                            mlir::ArrayRef<mlir::Value>{ckarg, newConstantOp.getResult()}
+                        );
                         arithOp.replaceAllUsesWith(newCallOp->getResult(0));
                         arithOp.erase();
                     }
@@ -457,16 +540,65 @@ struct ArithToEmitc : public PassWrapper<ArithToEmitc, OperationPass<ModuleOp>> 
                 arithOp.replaceAllUsesWith(newOp.getResult(0));
                 arithOp.erase();
             }
+            else if (auto extOp = dyn_cast<arith::ExtUIOp>(op)) {
+                if (extOp.getIn().getType() == fhedouble) {
+                    extOp.replaceAllUsesWith(extOp.getIn());
+                    extOp.erase();
+                } else {
+                    builder.setInsertionPoint(extOp);
+                    auto newOp = builder.create<emitc::CastOp>(
+                        extOp.getLoc(),
+                        extOp.getType(),
+                        extOp.getIn());
+                    extOp.replaceAllUsesWith(newOp.getResult());
+                    extOp.erase();
+                }
+            }
+            else if (auto loadOp = dyn_cast<memref::LoadOp>(op)) {
+                builder.setInsertionPoint(loadOp);
+                SmallVector<mlir::Value, 4> operands;
+                operands.push_back(ckarg);
+                operands.push_back(loadOp.getMemRef());
+                for (auto index : loadOp.getIndices()) {
+                    operands.push_back(index);
+                }
+                auto newOp = builder.create<emitc::CallOp>(
+                    loadOp.getLoc(),
+                    TypeRange(fhedouble),
+                    llvm::StringRef("FHEloadf"),
+                    ArrayAttr(),
+                    ArrayAttr(),
+                    operands);
+                loadOp.replaceAllUsesWith(newOp.getResult(0));
+                loadOp.erase();
+            }
+            else if (auto storeOp = dyn_cast<memref::StoreOp>(op)) {
+                builder.setInsertionPoint(storeOp);
+                SmallVector<mlir::Value, 4> operands;
+                operands.push_back(ckarg);
+                operands.push_back(storeOp.getValueToStore());
+                operands.push_back(storeOp.getMemRef());
+                for (auto index : storeOp.getIndices()) {
+                    operands.push_back(index);
+                }
+                builder.create<emitc::CallOp>(
+                    storeOp.getLoc(),
+                    TypeRange(),
+                    llvm::StringRef("FHEstoref"),
+                    ArrayAttr(),
+                    ArrayAttr(),
+                    operands);
+                storeOp.erase();
+            }
             
         });
         });
     }
-    
 
-}; // end anonymous namespace
+    MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(ArithToEmitc)
+};
 
-
-} // end namespace
+} // end anonymous namespace
 int main(int argc, char **argv) {
     // Initialize MLIR context with all dialects.
     mlir::MLIRContext context;
@@ -534,8 +666,32 @@ int main(int argc, char **argv) {
         llvm::errs() << "Error opening output file\n";
         return 1;
     }
+    bool emitCpp = false;
+    if (outputFilename.size() >= 4 &&
+        outputFilename.compare(outputFilename.size() - 4, 4, ".cpp") == 0) {
+        emitCpp = true;
+    }
 
-    module->print(outputFile->os());
+    if (emitCpp) {
+        outputFile->os()
+            << "#include \"../../src/backend/fhe_operations.hpp\"\n"
+               "#include \"../../src/backend/fhe_types.hpp\"\n"
+               "#include <cstddef>\n"
+               "#include <cstdint>\n"
+               "#include <iostream>\n"
+               "#include <vector>\n\n"
+               "using namespace CKKS;\n"
+               "using namespace CGGI;\n\n";
+        if (failed(mlir::emitc::translateToCpp(module.get(), outputFile->os()))) {
+            llvm::errs() << "Error translating MLIR to C++\n";
+            return 1;
+        }
+        if (!frontend::emitFheMain(outputFile->os(), *module)) {
+            llvm::errs() << "Warning: unable to emit FHE main for output\n";
+        }
+    } else {
+        module->print(outputFile->os());
+    }
     outputFile->keep();
 
     return 0;

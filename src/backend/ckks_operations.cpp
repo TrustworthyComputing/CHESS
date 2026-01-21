@@ -230,3 +230,39 @@ CKKS::FHEdouble FHEselect(FHEcontext* ctx, CKKS::FHEdouble sign, CKKS::FHEdouble
     // return FHEaddf(ctx, FHEmulf(ctx, sign,value1),FHEmulf(ctx, sign_prime,value2));
     return FHEaddf(ctx, FHEmulf(ctx, sign, CKKS::FHEsubf(ctx,value1,value2)),value2);
 }
+
+CKKS::FHEdouble FHElt(FHEcontext* ctx, CKKS::FHEdouble a, CKKS::FHEdouble b){
+    auto dif = FHEsubf(ctx, a, b);
+    auto lwes = CKKStoCGGI(ctx, dif);
+    auto sign = FHEsign(ctx, lwes);
+    return CGGItoCKKS(ctx, sign);
+}
+
+CKKS::FHEdouble FHEgt(FHEcontext* ctx, CKKS::FHEdouble a, CKKS::FHEdouble b){
+    return FHElt(ctx, b, a);
+}
+
+CKKS::FHEdouble FHEle(FHEcontext* ctx, CKKS::FHEdouble a, CKKS::FHEdouble b){
+    auto lt = FHElt(ctx, a, b);
+    auto eq = FHEeq(ctx, a, b);
+    return FHEaddf(ctx, lt, eq);
+}
+
+CKKS::FHEdouble FHEge(FHEcontext* ctx, CKKS::FHEdouble a, CKKS::FHEdouble b){
+    return FHEle(ctx, b, a);
+}
+
+CKKS::FHEdouble FHEne(FHEcontext* ctx, CKKS::FHEdouble a, CKKS::FHEdouble b){
+    auto eq = FHEeq(ctx, a, b);
+    return FHEsubfP(ctx, 1.0, eq);
+}
+
+CKKS::FHEdouble FHEloadf(FHEcontext* ctx, CKKS::FHEdouble* buffer, size_t index){
+    (void)ctx;
+    return buffer[index];
+}
+
+void FHEstoref(FHEcontext* ctx, CKKS::FHEdouble value, CKKS::FHEdouble* buffer, size_t index){
+    (void)ctx;
+    buffer[index] = value;
+}

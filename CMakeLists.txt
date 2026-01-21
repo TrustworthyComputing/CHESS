@@ -65,7 +65,7 @@ add_library(scheme_switching STATIC
     test/test.cpp
 )
 target_include_directories(scheme_switching
-    PUBLIC
+    SYSTEM PUBLIC
         ${OpenFHE_INCLUDE_DIRS}
 )
 if(OpenFHE_CXX_FLAGS)
@@ -92,6 +92,18 @@ if(BUILD_STATIC)
     list(APPEND _scheme_switching_link_flags -static)
 endif()
 set(_scheme_switching_exe_link_flags ${_scheme_switching_link_flags})
+
+set(RUN_OUTPUT_CPP "" CACHE FILEPATH "Path to a generated C++ file to build as run_output")
+if(RUN_OUTPUT_CPP)
+    if(NOT EXISTS "${RUN_OUTPUT_CPP}")
+        message(FATAL_ERROR "RUN_OUTPUT_CPP not found: ${RUN_OUTPUT_CPP}")
+    endif()
+    add_executable(run_output "${RUN_OUTPUT_CPP}")
+    target_link_libraries(run_output PRIVATE scheme_switching)
+    if(_scheme_switching_exe_link_flags)
+        target_link_options(run_output PRIVATE ${_scheme_switching_exe_link_flags})
+    endif()
+endif()
 
 if(BUILD_EXAMPLES)
     add_executable(main examples/main.cpp)
@@ -195,10 +207,12 @@ if(BUILD_MLIR_COMPILER)
         MLIRControlFlowInterfaces
         MLIRSideEffectInterfaces
         MLIRTargetLLVMIRExport
+        MLIRTargetCpp
         MLIRTransforms
     )
     add_llvm_executable(chess
         src/frontend/compiler.cpp
+        src/frontend/main_emitter.cpp
     )
 
     llvm_update_compile_flags(chess)

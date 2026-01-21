@@ -15,7 +15,8 @@ Output C++ is written to:     examples/output/<basename>.cpp
 
 Environment overrides:
   CHESS_BIN            Path to the chess binary (default: build/chess or build/compiler/chess)
-  MLIR_TRANSLATE_BIN   Path to mlir-translate (default: /home/rostin/Polygeist/build/bin/mlir-translate)
+  MLIR_OPT_BIN         Path to mlir-opt
+  POLYGEIST_ROOT       Prefix that contains bin/mlir-opt
 EOF
 }
 
@@ -33,9 +34,24 @@ fi
 
 mkdir -p "${output_dir}"
 
+mlir_opt_bin="${MLIR_OPT_BIN:-}"
+if [[ -z "${mlir_opt_bin}" && -n "${POLYGEIST_ROOT:-}" ]]; then
+  mlir_opt_bin="${POLYGEIST_ROOT}/bin/mlir-opt"
+fi
+if [[ -z "${mlir_opt_bin}" ]]; then
+  if command -v mlir-opt >/dev/null 2>&1; then
+    mlir_opt_bin="$(command -v mlir-opt)"
+  else
+    echo "mlir-opt not found. Set MLIR_OPT_BIN, POLYGEIST_ROOT, or add it to PATH." >&2
+    exit 1
+  fi
+fi
+
 chess_bin="${CHESS_BIN:-}"
 if [[ -z "${chess_bin}" ]]; then
-  if [[ -x "${repo_root}/build/chess" ]]; then
+  if [[ -x "${repo_root}/build/chess/chess" ]]; then
+    chess_bin="${repo_root}/build/chess/chess"
+  elif [[ -x "${repo_root}/build/chess" ]]; then
     chess_bin="${repo_root}/build/chess"
   elif [[ -x "${repo_root}/build/compiler/chess" ]]; then
     chess_bin="${repo_root}/build/compiler/chess"
@@ -47,21 +63,10 @@ fi
 
 base_name="$(basename "${input_path}")"
 base_name="${base_name%.mlir}"
-transformed_mlir="${mlir_dir}/${base_name}.ir.mlir"
+pre_lowered_mlir="${mlir_dir}/${base_name}.lowered_in.mlir"
 output_cpp="${output_dir}/${base_name}.cpp"
 
-"${chess_bin}" "${input_path}" "${transformed_mlir}"
-
-mlir_translate_bin="${MLIR_TRANSLATE_BIN:-/home/rostin/Polygeist/build/bin/mlir-translate}"
-if [[ ! -x "${mlir_translate_bin}" ]]; then
-  if command -v mlir-translate >/dev/null 2>&1; then
-    mlir_translate_bin="$(command -v mlir-translate)"
-  else
-    echo "mlir-translate not found. Set MLIR_TRANSLATE_BIN or add it to PATH." >&2
-    exit 1
-  fi
-fi
-
-"${mlir_translate_bin}" -allow-unregistered-dialect --mlir-to-cpp "${transformed_mlir}" -o "${output_cpp}"
+"${mlir_opt_bin}" -lower-affine "${input_path}" -o "${pre_lowered_mlir}"
+"${chess_bin}" "${pre_lowered_mlir}" "${output_cpp}"
 
 echo "Wrote ${output_cpp}"

@@ -2,6 +2,7 @@
 #define FHE_OPERATIONS_HPP
 
 #include "fhe_types.hpp"
+#include <cstddef>
 
 class FHEcontext {
 public:
@@ -89,6 +90,13 @@ CKKS::FHEdouble CGGItoCKKS(FHEcontext* ctx, std::vector<CGGI::FHEi32> a);
 
 CKKS::FHEdouble FHEeq(FHEcontext* ctx, CKKS::FHEdouble a, CKKS::FHEdouble b);
 CKKS::FHEdouble FHEselect(FHEcontext* ctx, CKKS::FHEdouble sign, CKKS::FHEdouble value1, CKKS::FHEdouble value2);
+CKKS::FHEdouble FHElt(FHEcontext* ctx, CKKS::FHEdouble a, CKKS::FHEdouble b);
+CKKS::FHEdouble FHEgt(FHEcontext* ctx, CKKS::FHEdouble a, CKKS::FHEdouble b);
+CKKS::FHEdouble FHEle(FHEcontext* ctx, CKKS::FHEdouble a, CKKS::FHEdouble b);
+CKKS::FHEdouble FHEge(FHEcontext* ctx, CKKS::FHEdouble a, CKKS::FHEdouble b);
+CKKS::FHEdouble FHEne(FHEcontext* ctx, CKKS::FHEdouble a, CKKS::FHEdouble b);
+CKKS::FHEdouble FHEloadf(FHEcontext* ctx, CKKS::FHEdouble* buffer, size_t index);
+void FHEstoref(FHEcontext* ctx, CKKS::FHEdouble value, CKKS::FHEdouble* buffer, size_t index);
 
 
 #endif // FHE_OPERATIONS_HPP
