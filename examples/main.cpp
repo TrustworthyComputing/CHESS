@@ -778,7 +778,7 @@ void decomp() {
     auto N = 1 << 11;
     // ccLWE->BinFHEContext::GenerateBinFHEContext(TOY, false, logQ_ccLWE, 0, GINX, false);
     // auto cc = BinFHEContext();
-    ccLWE->BinFHEContext::GenerateBinFHEContext(TOY, false, logQ, N, GINX);
+    ccLWE->BinFHEContext::GenerateBinFHEContext(STD128, false, logQ, N, GINX);
 
 
     auto ccbaseks = ccLWE->GetParams()->GetLWEParams()->GetBaseKS();
@@ -816,8 +816,8 @@ void decomp() {
 
     std::cout << "Completed the key generation." << std::endl;
 
-    int n = 16;
-    int bit = 8;
+    int n = 256;
+    int bit = 4;
     int num = 1 << bit;
     std::vector<int> array(n);
     std::srand(static_cast<unsigned>(std::time(0))); // Seed random number generator
@@ -908,8 +908,21 @@ void decomp() {
         dres_prime[i] = ccLWE->Encrypt(sk, 1, LARGE_DIM, p);
     }
 
+
+
+
+
+
+
+
+
+
+
     auto start = std::chrono::high_resolution_clock::now();
-    for (size_t i = 0; i < size; i++) {
+
+    // for (int m = 0; m <log(size)+1; m++){
+    // #pragma omp parallel for
+    for (int i = 0; i < size; i++) {
         auto& digits1 = LWEarray[i];
         auto& digits2 = LWEarray[i + 1];
 
@@ -928,6 +941,7 @@ void decomp() {
 
         ccLWE->GetLWEScheme()->EvalSubEq(dres_prime[i], dres);
 
+        // #pragma omp parallel for
         for (size_t j = 0; j < digits2.size(); ++j) {
             ccLWE->GetLWEScheme()->EvalMultConstEq(digits2[j], 2);
             ccLWE->GetLWEScheme()->EvalAddEq(digits2[j], dres_prime[i]);
@@ -941,6 +955,7 @@ void decomp() {
             LWEarray[i + 1][j] = temp1;
         }
     }
+    // }
 
     auto end = std::chrono::high_resolution_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();

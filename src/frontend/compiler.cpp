@@ -494,8 +494,21 @@ int main(int argc, char **argv) {
     context.appendDialectRegistry(registry);
     context.allowUnregisteredDialects();
 
+    std::string inputFilename = "examples/mlir/output1.mlir";
+    std::string outputFilename = "examples/mlir/ir.mlir";
+    if (argc >= 2) {
+        inputFilename = argv[1];
+    }
+    if (argc >= 3) {
+        outputFilename = argv[2];
+    }
+    if (argc > 3) {
+        llvm::errs() << "Usage: chess [input.mlir] [output.mlir]\n";
+        return 1;
+    }
+
     // Open and parse the MLIR file
-    std::string filename = "frontend/output1.mlir";
+    std::string filename = inputFilename;
     auto module = mlir::parseSourceFile<mlir::ModuleOp>(filename, &context);
     if (!module) {
         llvm::errs() << "Error parsing MLIR file\n";
@@ -516,7 +529,6 @@ int main(int argc, char **argv) {
     outs() << "Pass succeeded\n";
 
     // Output the transformed module
-    std::string outputFilename = "frontend/ir.mlir";
     auto outputFile = openOutputFile(outputFilename);
     if (!outputFile) {
         llvm::errs() << "Error opening output file\n";

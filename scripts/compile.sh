@@ -1,22 +1,67 @@
-original_dir=$(pwd)
+#!/usr/bin/env bash
+set -euo pipefail
 
-# clang++ -S -emit-llvm -O3 src/test.cpp -o src/test.ll
-cgeist test/test.cpp -S -O3 -raise-scf-to-affine --polyhedral-opt > src/frontend/test.mlir
-mlir-opt -affine-super-vectorize="virtual-vector-size=10 test-fastest-varying=0 vectorize-reductions=true" src/frontend/test.mlir -o src/frontend/output.mlir
-mlir-opt -lower-affine src/frontend/output.mlir -o src/frontend/output1.mlir
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+repo_root="$(cd "${script_dir}/.." && pwd)"
+mlir_dir="${repo_root}/examples/mlir"
+output_dir="${repo_root}/examples/output"
 
+usage() {
+  cat <<'EOF'
+Usage: compile.sh <mlir_filename>
 
-cd src/build
-cmake -G Ninja .. -DCMAKE_BUILD_TYPE=Debug -DMLIR_DIR=/home/rostin/Polygeist/build/lib/cmake/mlir -DLLVM_EXTERNAL_LIT=/home/rostin/Polygeist/build/bin/llvm-lit
-cmake --build .
-cd .. && ./compiler
+The input file is resolved as: examples/mlir/<mlir_filename>
+Output C++ is written to:     examples/output/<basename>.cpp
 
+Environment overrides:
+  CHESS_BIN            Path to the chess binary (default: build/chess or build/compiler/chess)
+  MLIR_TRANSLATE_BIN   Path to mlir-translate (default: /home/rostin/Polygeist/build/bin/mlir-translate)
+EOF
+}
 
-/home/rostin/Polygeist/build/bin/mlir-translate -allow-unregistered-dialect --mlir-to-cpp frontend/ir.mlir -o ../test/output.cpp
+if [[ $# -lt 1 ]]; then
+  usage
+  exit 1
+fi
 
+input_name="$1"
+input_path="${mlir_dir}/${input_name}"
+if [[ ! -f "${input_path}" ]]; then
+  echo "MLIR input not found: ${input_path}" >&2
+  exit 1
+fi
 
-cd "$original_dir"
-cd test
-g++ add_headers.cpp -o add_headers
-./add_headers
-rm add_headers
+mkdir -p "${output_dir}"
+
+chess_bin="${CHESS_BIN:-}"
+if [[ -z "${chess_bin}" ]]; then
+  if [[ -x "${repo_root}/build/chess" ]]; then
+    chess_bin="${repo_root}/build/chess"
+  elif [[ -x "${repo_root}/build/compiler/chess" ]]; then
+    chess_bin="${repo_root}/build/compiler/chess"
+  else
+    echo "chess binary not found. Build it with ./scripts/build_chess.sh <gcc|clang>" >&2
+    exit 1
+  fi
+fi
+
+base_name="$(basename "${input_path}")"
+base_name="${base_name%.mlir}"
+transformed_mlir="${mlir_dir}/${base_name}.ir.mlir"
+output_cpp="${output_dir}/${base_name}.cpp"
+
+"${chess_bin}" "${input_path}" "${transformed_mlir}"
+
+mlir_translate_bin="${MLIR_TRANSLATE_BIN:-/home/rostin/Polygeist/build/bin/mlir-translate}"
+if [[ ! -x "${mlir_translate_bin}" ]]; then
+  if command -v mlir-translate >/dev/null 2>&1; then
+    mlir_translate_bin="$(command -v mlir-translate)"
+  else
+    echo "mlir-translate not found. Set MLIR_TRANSLATE_BIN or add it to PATH." >&2
+    exit 1
+  fi
+fi
+
+"${mlir_translate_bin}" -allow-unregistered-dialect --mlir-to-cpp "${transformed_mlir}" -o "${output_cpp}"
+
+echo "Wrote ${output_cpp}"

@@ -1,12 +1,15 @@
 #include "openfhe.h"
 #include <chrono>
+#include <cmath>
+#include <cstdlib>
+#include <ctime>
 #include <iostream>
 #include <random>
 
 using namespace lbcrypto;
 using namespace std;
 
-shared_ptr<_NonArray<lbcrypto::BinFHEContext>> setup(enum lbcrypto::BINFHE_PARAMSET parm, bool arb, int N){
+shared_ptr<lbcrypto::BinFHEContext> setup(enum lbcrypto::BINFHE_PARAMSET parm, bool arb, int N){
     // Sample Program: Step 1: Set CryptoContext
     auto ccLWE = std::make_shared<BinFHEContext>();
     auto logQ = 25;
@@ -37,7 +40,7 @@ shared_ptr<_NonArray<lbcrypto::BinFHEContext>> setup(enum lbcrypto::BINFHE_PARAM
     return ccLWE;
 }
 
-vector<vector<LWECiphertext>> create_array(shared_ptr<_NonArray<lbcrypto::BinFHEContext>> ccLWE, int n, int num){
+vector<vector<LWECiphertext>> create_array(shared_ptr<lbcrypto::BinFHEContext> ccLWE, int n, int num){
     auto sk = ccLWE->KeyGen();
     std::vector<int> array(n);
     std::srand(static_cast<unsigned>(std::time(0))); // Seed random number generator
@@ -48,6 +51,7 @@ vector<vector<LWECiphertext>> create_array(shared_ptr<_NonArray<lbcrypto::BinFHE
 
     vector<vector<LWECiphertext>> LWEarray;
     int index = 0;
+    const size_t digit_count = static_cast<size_t>(std::log2(num) / 2);
     for (int number : array) {
         std::vector<int> base4Digits;
 
@@ -58,8 +62,8 @@ vector<vector<LWECiphertext>> create_array(shared_ptr<_NonArray<lbcrypto::BinFHE
         }
 
         // Ensure the number has exactly 4 digits by padding with zeros
-        cout << log2(num)/2 << endl;
-        while (base4Digits.size() < log2(num)/2) {
+        cout << digit_count << endl;
+        while (base4Digits.size() < digit_count) {
             base4Digits.push_back(0); // Pad with zeros
         }
 
@@ -141,17 +145,20 @@ void min_index() {
 
     auto start = std::chrono::high_resolution_clock::now();
 
-    int size = LWEarray.size()-1;
+    size_t size = LWEarray.size() - 1;
     int count = 0;
     int min = 0;
 
-    for (int m = 0; m <log(size+1); m++){
+    for (size_t m = 0; (static_cast<size_t>(1) << m) <= size; ++m){
+    const size_t offset = static_cast<size_t>(1) << m;
+    const size_t stride = static_cast<size_t>(1) << (m + 1);
+    const size_t limit = size - offset + 1;
     #pragma omp parallel for
-    for(size_t i = (int)pow(2,m)-1; i < size; i+= (int)pow(2,(m+1))) {
+    for(size_t i = offset - 1; i < limit; i += stride) {
         count +=1;
         // Grab two adjacent encrypted arrays
         const auto& digits1 = LWEarray[i];
-        const auto& digits2 = LWEarray[i + (int)pow(2,m)];
+        const auto& digits2 = LWEarray[i + offset];
 
         vector<LWECiphertext> primes(digits1.size());
 
@@ -178,9 +185,9 @@ void min_index() {
         auto dres_prime = ccLWE->Encrypt(sk, 1, LARGE_DIM, p);
         ccLWE->GetLWEScheme()->EvalSubEq(dres_prime, dres);
 
-        
+        const size_t digits2_size = digits2.size();
         #pragma omp parallel for
-        for (size_t j = 0; j < digits2.size(); ++j) {
+        for (size_t j = 0; j < digits2_size; ++j) {
             auto mutableDigits2 = digits2;
             ccLWE->GetLWEScheme()->EvalMultConstEq(mutableDigits2[j], 2);
             ccLWE->GetLWEScheme()->EvalAddEq(mutableDigits2[j], dres_prime);
@@ -198,7 +205,7 @@ void min_index() {
             ccLWE->GetLWEScheme()->EvalAddEq(mutableDigits1[j], dres);
 
             auto sag1 = ccLWE->GetLWEScheme()->ModSwitch(q/2, digits1[j]);
-            auto temp1 = ccsag->EvalFunc(sag1, lutmul);
+            auto temp1 = ccLWE->EvalFunc(sag1, lutmul);
 
 
             ccLWE->GetLWEScheme()->EvalAddEq(temp1,temp2);
