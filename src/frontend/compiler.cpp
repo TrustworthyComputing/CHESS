@@ -28,6 +28,7 @@
 
 
 #include <llvm/ADT/APFloat.h>
+#include <llvm/ADT/APInt.h>
 #include <llvm/Support/Casting.h>
 #include <llvm/Support/raw_ostream.h>
 #include <mlir/Dialect/Affine/IR/AffineOps.h>
@@ -39,6 +40,7 @@
 #include <mlir/IR/BuiltinTypes.h>
 #include <mlir/IR/Operation.h>
 #include <mlir/IR/Value.h>
+#include <mlir/IR/Matchers.h>
 #include <string>
 #include <iostream>
 #include <sstream>
@@ -340,6 +342,47 @@ struct ArithToEmitc : public PassWrapper<ArithToEmitc, OperationPass<ModuleOp>> 
             }
 
             else if (auto forOp = dyn_cast<scf::ForOp>(op)){
+                auto isSingleIterationFor = [&](scf::ForOp loop) -> bool {
+                    if (loop.getNumRegionIterArgs() != 0 || loop.getNumResults() != 0) {
+                        return false;
+                    }
+                    llvm::APInt lb;
+                    llvm::APInt ub;
+                    llvm::APInt step;
+                    if (!matchPattern(loop.getLowerBound(), m_ConstantInt(&lb)) ||
+                        !matchPattern(loop.getUpperBound(), m_ConstantInt(&ub)) ||
+                        !matchPattern(loop.getStep(), m_ConstantInt(&step))) {
+                        return false;
+                    }
+                    int64_t lbVal = lb.getSExtValue();
+                    int64_t ubVal = ub.getSExtValue();
+                    int64_t stepVal = step.getSExtValue();
+                    if (stepVal <= 0 || ubVal <= lbVal) {
+                        return false;
+                    }
+                    return (ubVal - lbVal) <= stepVal;
+                };
+
+                if (isSingleIterationFor(forOp)) {
+                    forOp.getInductionVar().replaceAllUsesWith(forOp.getLowerBound());
+
+                    auto *body = forOp.getBody();
+                    auto *terminator = body->getTerminator();
+                    std::vector<Operation *> opsToMove;
+                    opsToMove.reserve(body->getOperations().size());
+                    for (auto &bodyOp : body->getOperations()) {
+                        if (&bodyOp == terminator) {
+                            continue;
+                        }
+                        opsToMove.push_back(&bodyOp);
+                    }
+                    for (auto *bodyOp : opsToMove) {
+                        bodyOp->moveBefore(forOp);
+                    }
+                    forOp.erase();
+                    return;
+                }
+
                 builder.setInsertionPoint(forOp);
                 auto *newblock = forOp.getBody();
                 auto res = forOp.getResults();
@@ -679,6 +722,7 @@ int main(int argc, char **argv) {
                "#include <cstddef>\n"
                "#include <cstdint>\n"
                "#include <iostream>\n"
+               "#include <string>\n"
                "#include <vector>\n\n"
                "using namespace CKKS;\n"
                "using namespace CGGI;\n\n";

@@ -3,14 +3,13 @@ set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "${script_dir}/.." && pwd)"
-build_dir="${repo_root}/build/run"
 
 usage() {
   cat <<'EOF'
-Usage: run.sh <output_cpp_name>
+Usage: run.sh <output_cpp_name_or_path>
 
-The input file is resolved as: examples/output/<output_cpp_name>
-You can pass either "min_index" or "min_index.cpp".
+If a bare name is provided, the input file is resolved as:
+  examples/output/<name>.cpp
 EOF
 }
 
@@ -19,24 +18,47 @@ if [[ $# -lt 1 ]]; then
   exit 1
 fi
 
-output_name="$1"
-if [[ "${output_name}" != *.cpp ]]; then
-  output_name="${output_name}.cpp"
+input_arg="$1"
+shift
+if [[ "${input_arg}" == */* ]]; then
+  output_cpp="${input_arg}"
+elif [[ "${input_arg}" == *.cpp ]]; then
+  output_cpp="${repo_root}/examples/output/${input_arg}"
+else
+  output_cpp="${repo_root}/examples/output/${input_arg}.cpp"
 fi
 
-output_cpp="${repo_root}/examples/output/${output_name}"
 if [[ ! -f "${output_cpp}" ]]; then
   echo "Output C++ not found: ${output_cpp}" >&2
   exit 1
 fi
 
-cmake -S "${repo_root}" -B "${build_dir}" \
-  -DNATIVE_SIZE=32 \
-  -DCMAKE_C_COMPILER=clang-12 \
-  -DCMAKE_CXX_COMPILER=clang++-12 \
-  -DWITH_NTL=ON \
-  -DOMP_NUM_THREADS=24 \
-  -DRUN_OUTPUT_CPP="${output_cpp}"
+cxx="${CXX:-clang++}"
+cxxflags="${CXXFLAGS:--O2 -std=c++17}"
+openfhe_include="${OPENFHE_INCLUDE_DIR:-/usr/local/include/openfhe}"
+openfhe_lib_dir="${OPENFHE_LIB_DIR:-/usr/local/lib}"
+openfhe_libs="${OPENFHE_LIBS:- -lOPENFHEpke -lOPENFHEbinfhe -lOPENFHEcore -ldl}"
 
-cmake --build "${build_dir}" --target run_output
-"${build_dir}/run_output"
+include_flags=(
+  "-I${openfhe_include}"
+  "-I${openfhe_include}/third-party/include"
+  "-I${openfhe_include}/core"
+  "-I${openfhe_include}/pke"
+  "-I${openfhe_include}/binfhe"
+)
+
+output_bin="$(mktemp -t scheme_switching_run.XXXXXX)"
+src_backend=(
+  "${repo_root}/src/backend/ckks_operations.cpp"
+  "${repo_root}/src/backend/cggi_operations.cpp"
+)
+
+"${cxx}" ${cxxflags} \
+  "${output_cpp}" \
+  "${src_backend[@]}" \
+  "${include_flags[@]}" \
+  -L"${openfhe_lib_dir}" -Wl,-rpath,"${openfhe_lib_dir}" \
+  ${openfhe_libs} \
+  -o "${output_bin}"
+
+"${output_bin}" "$@"

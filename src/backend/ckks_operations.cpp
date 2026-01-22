@@ -2,12 +2,13 @@
 #include "fhe_types.hpp"
 #include <openfhe.h>
 #include <iostream>
+#include <string>
 
 using namespace lbcrypto;
 
 namespace CKKS {
 
-CKKS_scheme::CKKS_scheme(int multDepth, int scaleModSize, int batchSize)
+CKKS_scheme::CKKS_scheme(int multDepth, int scaleModSize, int batchSize, const std::string& security)
     : multDepth(multDepth), scaleModSize(scaleModSize), batchSize(batchSize) {
 
     
@@ -15,6 +16,11 @@ CKKS_scheme::CKKS_scheme(int multDepth, int scaleModSize, int batchSize)
     // uint32_t scaleModSize = 50;
     uint32_t firstModSize = 60;
     SecurityLevel sl      = lbcrypto::HEStd_128_classic;
+    if (security == "debug") {
+        std::cout << "Using insecure CKKS parameters" << std::endl;
+        sl = lbcrypto::HEStd_NotSet;
+        ringDimension = 1024;
+    }
     // BINFHE_PARAMSET slBin = TOY;
     // uint32_t logQ_ccLWE   = 25;
     // uint32_t slots        = 1;  
@@ -30,6 +36,9 @@ CKKS_scheme::CKKS_scheme(int multDepth, int scaleModSize, int batchSize)
     parameters.SetScalingTechnique(scTech);
     parameters.SetSecurityLevel(sl);
     parameters.SetBatchSize(batchSize);
+    if (security == "debug") {
+        parameters.SetRingDim(ringDimension);
+    }
     // parameters.SetSecretKeyDist(UNIFORM_TERNARY);
     // parameters.SetKeySwitchTechnique(HYBRID);
     // parameters.SetNumLargeDigits(3);
@@ -190,7 +199,8 @@ CKKS::FHEdouble CGGItoCKKS(FHEcontext* ctx, std::vector<CGGI::FHEi32> a) {
         lweCiphertexts.push_back(fhei32.getCiphertext());
     }
     int batchSize = ctx->getCKKS().getBatchSize();
-    auto ctxt = ctx->getCKKS().getCryptoContext()->EvalFHEWtoCKKS(lweCiphertexts,batchSize,batchSize);
+    auto ctxt = ctx->getCKKS().getCryptoContext()->EvalFHEWtoCKKS(
+        lweCiphertexts, batchSize, batchSize, 2, 0.0, 1.0);
 
     return CKKS::FHEdouble(ctxt);
 
@@ -199,7 +209,7 @@ CKKS::FHEdouble CGGItoCKKS(FHEcontext* ctx, std::vector<CGGI::FHEi32> a) {
 std::vector<CGGI::FHEi32> FHEsign(FHEcontext* ctx, std::vector<CGGI::FHEi32> lwes){
     std::vector<CGGI::FHEi32> result;
     for (auto& lwe : lwes) {
-        auto temp = ctx->getCGGI().getCryptoContext()->EvalSign(lwe.getCiphertext());
+        auto temp = ctx->getCGGI().getCryptoContext()->EvalSign(lwe.getCiphertext(), true);
         result.push_back(CGGI::FHEi32(temp));
     }
     return result;
@@ -207,20 +217,10 @@ std::vector<CGGI::FHEi32> FHEsign(FHEcontext* ctx, std::vector<CGGI::FHEi32> lwe
 
 
 CKKS::FHEdouble FHEeq(FHEcontext* ctx, CKKS::FHEdouble a, CKKS::FHEdouble b){
-    auto dif = FHEsubf(ctx, a,b);
-    auto lwes = CKKStoCGGI(ctx, dif);
-    auto sign = FHEsign(ctx, lwes);
-
-    auto dif_prime = FHEsubf(ctx, b,a);
-    auto lwes_prime = CKKStoCGGI(ctx, dif_prime);
-    auto sign_prime = FHEsign(ctx, lwes_prime);
-
-    std::vector<CGGI::FHEi32> ors;
-    for (size_t i = 0; i < sign.size(); i++){
-        ors.push_back(CGGI::FHEor(ctx, sign[i],sign_prime[i]));
-        ors[i] = CGGI::FHEnot(ctx, ors[i]);
-    }
-    return CGGItoCKKS(ctx, ors);
+    auto lt_ab = FHElt(ctx, a, b);
+    auto lt_ba = FHElt(ctx, b, a);
+    auto sum = FHEaddf(ctx, lt_ab, lt_ba);
+    return FHEsubfP(ctx, 1.0, sum);
     
 
 }
@@ -232,10 +232,10 @@ CKKS::FHEdouble FHEselect(FHEcontext* ctx, CKKS::FHEdouble sign, CKKS::FHEdouble
 }
 
 CKKS::FHEdouble FHElt(FHEcontext* ctx, CKKS::FHEdouble a, CKKS::FHEdouble b){
-    auto dif = FHEsubf(ctx, a, b);
-    auto lwes = CKKStoCGGI(ctx, dif);
-    auto sign = FHEsign(ctx, lwes);
-    return CGGItoCKKS(ctx, sign);
+    int slots = ctx->getCKKS().getBatchSize();
+    auto lt_ab = ctx->getCKKS().getCryptoContext()->EvalCompareSchemeSwitching(
+        a.getCiphertext(), b.getCiphertext(), slots, slots);
+    return CKKS::FHEdouble(lt_ab);
 }
 
 CKKS::FHEdouble FHEgt(FHEcontext* ctx, CKKS::FHEdouble a, CKKS::FHEdouble b){
@@ -243,13 +243,13 @@ CKKS::FHEdouble FHEgt(FHEcontext* ctx, CKKS::FHEdouble a, CKKS::FHEdouble b){
 }
 
 CKKS::FHEdouble FHEle(FHEcontext* ctx, CKKS::FHEdouble a, CKKS::FHEdouble b){
-    auto lt = FHElt(ctx, a, b);
-    auto eq = FHEeq(ctx, a, b);
-    return FHEaddf(ctx, lt, eq);
+    auto lt_ba = FHElt(ctx, b, a);
+    return FHEsubfP(ctx, 1.0, lt_ba);
 }
 
 CKKS::FHEdouble FHEge(FHEcontext* ctx, CKKS::FHEdouble a, CKKS::FHEdouble b){
-    return FHEle(ctx, b, a);
+    auto lt_ab = FHElt(ctx, a, b);
+    return FHEsubfP(ctx, 1.0, lt_ab);
 }
 
 CKKS::FHEdouble FHEne(FHEcontext* ctx, CKKS::FHEdouble a, CKKS::FHEdouble b){

@@ -75,10 +75,6 @@ cmake -S "${repo_root}" -B "${build_dir}" \
   -DCMAKE_C_COMPILER="${c_compiler}" \
   -DCMAKE_CXX_COMPILER="${cxx_compiler}" \
   "${extra_args[@]}"
-if [[ -f "${build_dir}/compile_commands.json" ]]; then
-  cp "${build_dir}/compile_commands.json" "${repo_root}/compile_commands.json"
-fi
-
 if [[ "${no_backend}" -eq 0 ]]; then
   cmake --build "${build_dir}" --target scheme_switching
 fi

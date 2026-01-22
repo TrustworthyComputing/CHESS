@@ -10,7 +10,7 @@ Usage: polygeist.sh <mlir_name> [input_cpp]
 
 mlir_name can be a basename (e.g., min_index) or a path ending in .mlir.
 The final MLIR is written to examples/mlir/.
-input_cpp defaults to test/test.cpp.
+input_cpp defaults to examples/input/<mlir_name>.cpp.
 EOF
 }
 
@@ -20,7 +20,11 @@ if [[ $# -lt 1 ]]; then
 fi
 
 mlir_name="$1"
-input_cpp="${2:-${repo_root}/test/test.cpp}"
+default_input="${repo_root}/examples/input/${mlir_name}"
+if [[ "${default_input}" != *.cpp ]]; then
+  default_input="${default_input}.cpp"
+fi
+input_cpp="${2:-${default_input}}"
 
 if [[ "${mlir_name}" == *.mlir ]]; then
   base_name="$(basename "${mlir_name}")"

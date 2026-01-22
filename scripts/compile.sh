@@ -26,6 +26,9 @@ if [[ $# -lt 1 ]]; then
 fi
 
 input_name="$1"
+if [[ "${input_name}" != *.mlir ]]; then
+  input_name="${input_name}.mlir"
+fi
 input_path="${mlir_dir}/${input_name}"
 if [[ ! -f "${input_path}" ]]; then
   echo "MLIR input not found: ${input_path}" >&2
@@ -63,10 +66,12 @@ fi
 
 base_name="$(basename "${input_path}")"
 base_name="${base_name%.mlir}"
-pre_lowered_mlir="${mlir_dir}/${base_name}.lowered_in.mlir"
 output_cpp="${output_dir}/${base_name}.cpp"
 
-"${mlir_opt_bin}" -lower-affine "${input_path}" -o "${pre_lowered_mlir}"
-"${chess_bin}" "${pre_lowered_mlir}" "${output_cpp}"
+temp_mlir="$(mktemp -t chess.lowered.XXXXXX.mlir)"
+trap 'rm -f "${temp_mlir}"' EXIT
+
+"${mlir_opt_bin}" -lower-affine "${input_path}" -o "${temp_mlir}"
+"${chess_bin}" "${temp_mlir}" "${output_cpp}"
 
 echo "Wrote ${output_cpp}"

@@ -3,6 +3,7 @@
 
 #include "fhe_types.hpp"
 #include <cstddef>
+#include <string>
 
 class FHEcontext {
 public:
@@ -19,7 +20,7 @@ private:
 namespace CGGI {
     class CGGI_scheme {
     public:
-        CGGI_scheme(CKKS::Context_CKKS context);
+        CGGI_scheme(CKKS::Context_CKKS context, const std::string& security = "secure");
         Context_CGGI getContext();
     private:
         Context_CGGI context;
@@ -47,7 +48,8 @@ namespace CGGI {
 namespace CKKS {
     class CKKS_scheme {
     public:
-        CKKS_scheme(int multDepth = 17, int scaleModSize = 50, int batchSize = 1);
+        CKKS_scheme(int multDepth = 17, int scaleModSize = 50, int batchSize = 1,
+                    const std::string& security = "secure");
         Context_CKKS getContext();
         std::vector<CGGI::FHEi32> FHEsign(std::vector<CGGI::FHEi32> lwes);
 

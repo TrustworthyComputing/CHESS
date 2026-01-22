@@ -1,14 +1,20 @@
 #include "fhe_operations.hpp"
 #include "fhe_types.hpp"
 #include <openfhe.h>
+#include <string>
 
 using namespace lbcrypto;
 
 namespace CGGI { 
 
-CGGI_scheme::CGGI_scheme(CKKS::Context_CKKS ckcontext) {
+CGGI_scheme::CGGI_scheme(CKKS::Context_CKKS ckcontext, const std::string& security) {
     SecurityLevel sl      = lbcrypto::HEStd_128_classic;
     BINFHE_PARAMSET slBin = lbcrypto::STD128;
+    if (security == "debug") {
+        std::cout << "Using insecure CGGI parameters" << std::endl;
+        sl = lbcrypto::HEStd_NotSet;
+        slBin = lbcrypto::TOY;
+    }
     uint32_t logQ_ccLWE   = 25;
     int batchSize = ckcontext.getBatchSize();
 
@@ -40,9 +46,7 @@ Context_CGGI CGGI_scheme::getContext(){
 
 FHEplaini FHEdecrypt(FHEcontext* ctx, FHEi32 a, int p){
     LWEPlaintext result;
-    std::cout << "sag" << std::endl;
     ctx->getCGGI().getCryptoContext()->Decrypt(ctx->getCGGI().getKeys(), a.getCiphertext(),&result, p);
-    std::cout << "lol" << std::endl;
     return FHEplaini(result);
 }
 
@@ -134,4 +138,3 @@ FHEi32 FHEmuliP(FHEcontext* ctx, FHEi32 a, int b) {
 // CGGI::FHEi32 FHEor(CGGI::FHEi32 a, CGGI::FHEi32 b){
 //     return conFHEor(a,b);
 // }
-

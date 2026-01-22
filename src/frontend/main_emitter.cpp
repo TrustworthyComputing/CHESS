@@ -75,17 +75,27 @@ bool emitFheMain(llvm::raw_ostream &os, mlir::ModuleOp module) {
         returnsFheDouble = true;
     }
 
+    bool wantsPlainCheck = (targetFunc.getName() == "min_index");
     bool hasArrayArgs = false;
+    std::vector<unsigned> arrayArgIndices;
     for (const auto &arg : args) {
         if (arg.kind == ArgKind::kArray) {
             hasArrayArgs = true;
-            break;
+            arrayArgIndices.push_back(arg.index);
         }
     }
 
-    os << "\nint main() {\n";
-    os << "    CKKS_scheme ck(15, 50, 16);\n";
-    os << "    CGGI_scheme cg(ck.getContext());\n";
+    if (wantsPlainCheck) {
+        os << "\n#include \"../input/min_index.cpp\"\n";
+    }
+
+    os << "\nint main(int argc, char **argv) {\n";
+    os << "    std::string security = \"secure\";\n";
+    os << "    if (argc > 1) {\n";
+    os << "        security = argv[1];\n";
+    os << "    }\n";
+    os << "    CKKS_scheme ck(15, 50, 16, security);\n";
+    os << "    CGGI_scheme cg(ck.getContext(), security);\n";
     os << "    FHEcontext* ctx = new FHEcontext(ck.getContext(), cg.getContext());\n\n";
 
     if (hasArrayArgs) {
@@ -126,6 +136,37 @@ bool emitFheMain(llvm::raw_ostream &os, mlir::ModuleOp module) {
     if (returnsFheDouble) {
         os << "    FHEplainf result_plain = FHEdecrypt(ctx, result);\n";
         os << "    std::cout << \"Result: \" << result_plain.getPlaintext() << std::endl;\n\n";
+    }
+
+    if (wantsPlainCheck && arrayArgIndices.size() >= 2) {
+        unsigned inputIndex = arrayArgIndices[0];
+        unsigned outputIndex = arrayArgIndices[1];
+        os << "    int plain_input[kDefaultArraySize] = {};\n";
+        os << "    int plain_output[kDefaultArraySize] = {};\n";
+        os << "    for (size_t i = 0; i < kDefaultArraySize; ++i) {\n";
+        os << "        plain_input[i] = static_cast<int>(arg" << inputIndex << "_plain[i]);\n";
+        os << "    }\n";
+        os << "    min_index(plain_input, plain_output);\n";
+        os << "    bool ok = true;\n";
+        os << "    for (size_t i = 0; i < kDefaultArraySize; ++i) {\n";
+        os << "        FHEplainf out_plain = FHEdecrypt(ctx, arg" << outputIndex << "[i]);\n";
+        os << "        auto packed = out_plain.getPlaintext()->GetRealPackedValue();\n";
+        os << "        double value = packed.empty() ? 0.0 : packed[0];\n";
+        os << "        int rounded = value >= 0.5 ? 1 : 0;\n";
+        os << "        if (rounded != plain_output[i]) {\n";
+        os << "            ok = false;\n";
+        os << "            break;\n";
+        os << "        }\n";
+        os << "    }\n";
+        os << "    std::cout << \"Plain min_index: \";\n";
+        os << "    for (size_t i = 0; i < kDefaultArraySize; ++i) {\n";
+        os << "        std::cout << plain_output[i];\n";
+        os << "        if (i + 1 < kDefaultArraySize) {\n";
+        os << "            std::cout << \" \";\n";
+        os << "        }\n";
+        os << "    }\n";
+        os << "    std::cout << std::endl;\n";
+        os << "    std::cout << \"FHE min_index ok: \" << (ok ? \"yes\" : \"no\") << std::endl;\n\n";
     }
 
     for (const auto &arg : args) {

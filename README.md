@@ -10,7 +10,7 @@ Scheme Switching is an experimental compiler toolchain that targets multiple Ful
 
 - `examples/` - runnable samples that exercise the operations implemented in `scheme_switching`.
 - `src/` - MLIR front-end and lowering pipeline. Enable with `-DBUILD_MLIR_COMPILER=ON`.
-- `scripts/` - helper shell scripts (`compile.sh`, `run.sh`) that demonstrate the MLIR -> C++ path.
+- `scripts/` - helper shell scripts (`build_chess.sh`, `polygeist.sh`, `compile.sh`, `run.sh`) that demonstrate the MLIR -> C++ path.
 - `test/` - harness used while developing the OpenFHE kernels.
 
 ## Requirements
@@ -93,6 +93,38 @@ Useful cache options:
 
 The build produces the `scheme_switching` static library along with the `main`, `example`, `ir`, and `experiments` executables in the chosen build directory.
 
+## Scripted workflow (step-by-step)
+
+The four scripts under `scripts/` implement a minimal pipeline from C++ → MLIR → generated C++ → run.
+
+1) Build the MLIR compiler (`chess`):
+```
+./scripts/build_chess.sh clang
+```
+
+2) Generate MLIR from a simple input under `examples/input/`:
+```
+./scripts/polygeist.sh compare_lt
+```
+This reads `examples/input/compare_lt.cpp` and writes `examples/mlir/compare_lt.mlir`.
+
+3) Lower MLIR to generated C++:
+```
+./scripts/compile.sh compare_lt
+```
+This reads `examples/mlir/compare_lt.mlir` and writes `examples/output/compare_lt.cpp`. (No extra MLIR files are emitted.)
+
+4) Compile and run the generated C++:
+```
+./scripts/run.sh compare_lt secure
+```
+You can also pass `debug` to use insecure parameters.
+
+Notes:
+- `polygeist.sh` requires `cgeist` and `mlir-opt` in `PATH` (or via `POLYGEIST_ROOT`).
+- `compile.sh` requires `mlir-opt` and a built `chess` binary.
+- `run.sh` compiles the output C++ on the fly and accepts an optional mode string.
+
 ## Running an example
 
 ```
@@ -115,30 +147,3 @@ cmake --build build/compiler --target chess
 ```
 
 The `scripts/compile.sh` helper shows one way of producing MLIR with `cgeist`, optimizing it with `mlir-opt`, translating to C++, and stitching the generated sources into the OpenFHE runtime. The `chess` binary is the MLIR-to-OpenFHE C++ compiler.
-
-## Supported operations
-
-| Name                 | Symbol     | Supported by FHE Schemes |
-|----------------------|------------|--------------------------|
-| Negation             | -          | TFHE, CKKS, BGV          |
-| Addition             | +          | TFHE, CKKS, BGV          |
-| Subtraction          | -          | TFHE, CKKS, BGV          |
-| Multiplication       | *          | TFHE, CKKS, BGV          |
-| Division             | /          | TFHE, CKKS               |
-| Remainder            | %          | TFHE, CKKS               |
-| Logical NOT          | !          | TFHE                     |
-| Bitwise AND          | &          | TFHE                     |
-| Bitwise OR           | \|         | TFHE                     |
-| Bitwise XOR          | ^          | TFHE                     |
-| Bitwise Shift Right  | >>         | TFHE                     |
-| Bitwise Shift Left   | <<         | TFHE                     |
-| Minimum              | min        | TFHE, CKKS               |
-| Maximum              | max        | TFHE, CKKS               |
-| Greater Than         | gt         | TFHE, CKKS               |
-| Greater or Equal     | ge         | TFHE, CKKS               |
-| Less Than            | lt         | TFHE, CKKS               |
-| Less or Equal        | le         | TFHE, CKKS               |
-| Equal                | eq         | TFHE, CKKS, BGV          |
-| Cast (into dest type)| cast_into  | TFHE, CKKS, BGV          |
-| Cast (from src type) | cast_from  | TFHE, CKKS, BGV          |
-| Ternary Operator     | select     | TFHE                     |
