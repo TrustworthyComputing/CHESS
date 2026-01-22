@@ -1,25 +1,29 @@
-# Scheme Switching
+<h1 align="center">CHESS: Compiling Homomorphic Encryption with Scheme Switching <a href="https://github.com/TrustworthyComputing/gpt-thief/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg"></a> </h1>
 
-Scheme Switching is an experimental compiler toolchain that targets multiple Fully Homomorphic Encryption (FHE) schemes (TFHE, CKKS, BGV, and BinFHE). The repository bundles:
+## Overview
+This project implements the scheme switching methodology introduced in CHESS (IEEE HOST'25), enabling secure and efficient computations by seamlessly bridging the CKKS and CGGI fully homomorphic encryption (FHE) schemes. By adopting the MLIR framework, the CHESS compiler translates high-level C++ code into an intermediate representation (IR) that orchestrates dynamic, mid-execution switching between FHE schemes. This approach ensures that arithmetic-intensive operations benefit from CKKS batching, while nonlinear functions fully exploit the strengths of the CGGI scheme. In addition to core switching techniques, this repository introduces innovative methods to ensure ciphertext compatibility, enable high-precision homomorphic operations, and generate optimized FHE code for an OpenFHE backend.
 
-- an OpenFHE-backed runtime (`scheme_switching` library) plus a handful of examples under `examples/`,
+# Scheme Switching Compiler
+
+This is an experimental compiler toolchain that targets multiple Fully Homomorphic Encryption (FHE) schemes (TFHE, CKKS), and supports scheme switching between them. The repository bundles:
+
+- an OpenFHE-backed runtime plus generated inputs/MLIR/output under `examples/`,
 - a prototype MLIR front-end that lowers MLIR modules into C++ (see `src/frontend/compiler.cpp`),
 - helper scripts to exercise the Polygeist/MLIR-based workflow.
 
 ## Repository layout
 
-- `examples/` - runnable samples that exercise the operations implemented in `scheme_switching`.
+- `examples/` - input C++ (`examples/input/`), MLIR (`examples/mlir/`), and generated C++ output (`examples/output/`).
 - `src/` - MLIR front-end and lowering pipeline. Enable with `-DBUILD_MLIR_COMPILER=ON`.
 - `scripts/` - helper shell scripts (`build_chess.sh`, `polygeist.sh`, `compile.sh`, `run.sh`) that demonstrate the MLIR -> C++ path.
-- `test/` - harness used while developing the OpenFHE kernels.
 
 ## Requirements
 
 - CMake 3.16+ and Ninja or GNU Make.
-- A C++17 toolchain (Clang >= 12 or GCC >= 10) with OpenMP if you want to run the parallel experiments.
+- A C++17 toolchain (Clang >= 12 or GCC >= 10)
 - Python 3 (used by some MLIR/LLVM utilities).
 - [OpenFHE](https://github.com/openfheorg/openfhe-development) installed with its CMake package (either shared or static builds work).
-- Optional: LLVM/MLIR (for the compiler target and MLIR tooling), Polygeist's `cgeist` if you plan to reuse the helper scripts.
+- LLVM/MLIR (for the compiler target and MLIR tooling) and Polygeist's `cgeist` if you plan to reuse the helper scripts.
 
 ### Installing OpenFHE
 
@@ -55,7 +59,7 @@ Expose the package configuration files to CMake:
 - `MLIR_DIR=/opt/llvm/lib/cmake/mlir`
 - `LLVM_DIR=/opt/llvm/lib/cmake/llvm`
 
-If you want to follow the Polygeist-based path (as documented in `scripts/compile.sh`), also build Polygeist so that `cgeist`, `mlir-opt`, and `mlir-translate` are on your `PATH`.
+If you want to follow the Polygeist-based path (as documented in `scripts/polygeist.sh`), also build Polygeist so that `cgeist` and `mlir-opt` are on your `PATH`.
 
 ## Configuring and building
 
@@ -91,11 +95,11 @@ Useful cache options:
 - `-DBUILD_STATIC=ON` links everything against the static OpenFHE libraries. Pass this together with `-DBUILD_SHARED=OFF` when configuring OpenFHE.
 - `-DBUILD_MLIR_COMPILER=ON` enables the MLIR toolchain under `src/`. Leave it `OFF` if you only want the OpenFHE examples.
 
-The build produces the `scheme_switching` static library along with the `main`, `example`, `ir`, and `experiments` executables in the chosen build directory.
+The build produces the `scheme_switching` static library and (when enabled) the `chess` compiler binary.
 
 ## Scripted workflow (step-by-step)
 
-The four scripts under `scripts/` implement a minimal pipeline from C++ → MLIR → generated C++ → run.
+The four scripts under `scripts/` implement a minimal pipeline from C++ → MLIR → FHE C++ → run.
 
 1) Build the MLIR compiler (`chess`):
 ```
@@ -118,21 +122,12 @@ This reads `examples/mlir/compare_lt.mlir` and writes `examples/output/compare_l
 ```
 ./scripts/run.sh compare_lt secure
 ```
-You can also pass `debug` to use insecure parameters.
+You can also pass `debug` to use insecure parameters for debugging.
 
 Notes:
 - `polygeist.sh` requires `cgeist` and `mlir-opt` in `PATH` (or via `POLYGEIST_ROOT`).
 - `compile.sh` requires `mlir-opt` and a built `chess` binary.
 - `run.sh` compiles the output C++ on the fly and accepts an optional mode string.
-
-## Running an example
-
-```
-cmake --build build --target experiments
-./build/experiments
-```
-
-`examples/experiments.cpp` sets up a BinFHE context, encrypts random vectors, and evaluates a parallel minimum-index search. You can also run `./build/main` for a larger CKKS/TFHE demonstration or `./build/ir` to inspect the IR-focused sample.
 
 ## Building only the MLIR compiler
 
@@ -146,4 +141,27 @@ cmake -S . -B build/compiler \
 cmake --build build/compiler --target chess
 ```
 
-The `scripts/compile.sh` helper shows one way of producing MLIR with `cgeist`, optimizing it with `mlir-opt`, translating to C++, and stitching the generated sources into the OpenFHE runtime. The `chess` binary is the MLIR-to-OpenFHE C++ compiler.
+The `scripts/polygeist.sh` helper produces MLIR with `cgeist`. The `scripts/compile.sh` helper lowers MLIR with `mlir-opt` and translates it to C++ using the `chess` compiler.
+
+
+
+### How to cite this work
+This work has been presented at the 2025 IEEE Hardware Oriented Security and Trust (HOST) symposium. You can cite this work as follows:
+```
+@inproceedings{shokri2025chess,
+    author = {Rostin Shokri and Nektarios Georgios Tsoutsos},
+    title = {{CHESS: Compiling Homomorphic Encryption with Scheme Switching}},
+    booktitle={International Symposium on Hardware Oriented Security and Trust (HOST)},
+    pages={1--11},
+    year={2025},
+    organization={IEEE}
+}
+```
+
+## Acknowledgments
+This work was supported by the National Science Foundation (Award #2239334).
+
+<p align="center">
+    <img src="./logos/twc.png" height="20%" width="20%">
+</p>
+<h4 align="center">Trustworthy Computing Group</h4>
