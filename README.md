@@ -1,9 +1,9 @@
 <h1 align="center">CHESS: Compiling Homomorphic Encryption with Scheme Switching <a href="https://github.com/TrustworthyComputing/gpt-thief/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg"></a> </h1>
 
-## Overview
+# Overview
 This project implements the scheme switching methodology introduced in CHESS (IEEE HOST'25), enabling secure and efficient computations by seamlessly bridging the CKKS and CGGI fully homomorphic encryption (FHE) schemes. By adopting the MLIR framework, the CHESS compiler translates high-level C++ code into an intermediate representation (IR) that orchestrates dynamic, mid-execution switching between FHE schemes. This approach ensures that arithmetic-intensive operations benefit from CKKS batching, while nonlinear functions fully exploit the strengths of the CGGI scheme. In addition to core switching techniques, this repository introduces innovative methods to ensure ciphertext compatibility, enable high-precision homomorphic operations, and generate optimized FHE code for an OpenFHE backend.
 
-# Scheme Switching Compiler
+## Scheme Switching Compiler
 
 This is an experimental compiler toolchain that targets multiple Fully Homomorphic Encryption (FHE) schemes (TFHE, CKKS), and supports scheme switching between them. The repository bundles:
 
